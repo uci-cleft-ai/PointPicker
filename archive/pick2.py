@@ -1,6 +1,6 @@
 import cv2
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel, QFileDialog, QScrollArea
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFileDialog, QScrollArea
 from PyQt5.QtCore import QUrl, QEventLoop, Qt
 import pyqtgraph as pg
 
@@ -13,8 +13,7 @@ class ImagePlot(pg.GraphicsLayoutWidget):
         self.image_file = None
         self.image_item = None
 
-        self.curr_point = -1
-        self.last_points = []
+        self.curr_point = 0
 
         self.p1 = pg.PlotItem()
         self.addItem(self.p1)
@@ -30,13 +29,11 @@ class ImagePlot(pg.GraphicsLayoutWidget):
         )
 
         self.scatterItem.setZValue(2) # Ensure scatterPlotItem is always at top
-        self.points = []
-        for l in landmark_labels:
-            self.points.append([l, []])
+        self.points = [] # Record Points
 
         self.p1.addItem(self.scatterItem)
 
-        direction.setText("Select Landmark")
+        direction.setText("Select "+landmark_labels[self.curr_point])
 
 
     def set_image(self, image):
@@ -55,44 +52,33 @@ class ImagePlot(pg.GraphicsLayoutWidget):
         self.set_image(image)
 
         self.points = []
-        for l in landmark_labels:
-            self.points.append([l, []])
-        self.scatterItem.setData(pos=[])
+        self.scatterItem.setData(pos=self.points)
 
         self.image_file = image_file
 
 
     def proceed(self):
         global proceed_ok
-        for l, p in self.points:
-            if len(p)==0:
-                if self.curr_point != -1:
-                    direction.setText("You have not marked all the points.\nSelect "+landmark_labels[self.curr_point])
-                else:
-                    direction.setText("You have not marked all the points.")
-                return
-        record_data([i[1] for i in self.points], self.image_file)
-        proceed_ok = True
+        if len(self.points) == len(landmark_labels):
+            record_data(self.points, self.image_file)
+            proceed_ok = True
+        else:
+            direction.setText("You have not marked all the points.\nSelect "+landmark_labels[self.curr_point])
 
 
     def add_data(self, x, y):
 
-        self.points[self.curr_point][1] = [x, y]
-        self.scatterItem.setData(pos=[i[1] for i in self.points if len(i[1])!=0])
+        self.points.append([x, y])
+        self.scatterItem.setData(pos=self.points)
 
         t = QLabel(landmark_labels[self.curr_point]+": "+str(x)+", "+str(y))
         text_layout.addWidget(t)
 
-        landmark_buttons[self.curr_point].setStyleSheet("background-color : green")
-
-        self.last_points.append(self.curr_point)
-        self.curr_point = -1
-
-        for l, p in self.points:
-            if len(p)==0:
-                direction.setText("Select Landmark")
-                return
-        direction.setText("Press Confirm")
+        self.curr_point += 1
+        if self.curr_point < len(landmark_labels):
+            direction.setText("Select "+landmark_labels[self.curr_point])
+        else:
+            direction.setText("Press Confirm")
 
 
     def mousePressEvent(self, event):
@@ -100,20 +86,14 @@ class ImagePlot(pg.GraphicsLayoutWidget):
         # Get pixel position of the mouse click
         x, y = point.x(), point.y()
 
-        if event.button() == Qt.LeftButton and self.curr_point != -1:
+        if event.button() == Qt.LeftButton and self.curr_point < len(landmark_labels):
             self.add_data(x, y)
 
         super().mousePressEvent(event)
 
 
-    def landmark_select(self, i):
-        self.curr_point = i
-        landmark_buttons[i].setStyleSheet("background-color : yellow")
-        direction.setText("Select "+landmark_labels[i])
-
-
 def record_data(points, image_file):
-    a = open("cleft_landmarks.csv", "a")
+    a = open("../cleft_landmarks.csv","a")
     a.write(image_file+","+",".join([str(i) for s in points for i in s])+"\n")
 
 
@@ -126,41 +106,21 @@ def clear_layout(layout):
         widgetToRemove.setParent(None)
 
 
-def add_buttons(layout):
-    global landmark_buttons
-    landmark_buttons = []
-    for i in range(len(landmark_labels)):
-        landmark_buttons.append(QPushButton(landmark_labels[i]))
-        landmark_buttons[-1].clicked.connect(button_click(i))
-        landmark_buttons[-1].setStyleSheet("background-color : red")
-        layout.addWidget(landmark_buttons[-1], i%((len(landmark_labels)+1)//2), 2*i//len(landmark_labels))
-
-
-def button_click(i):
-    return lambda: imageplot_main.landmark_select(i)
-
-
 def reset():
     imageplot_main.points = []
-    for l in landmark_labels:
-        imageplot_main.points.append([l, []])
-    for i in range(len(landmark_labels)):
-        landmark_buttons[i].setStyleSheet("background-color : red")
     imageplot_main.scatterItem.setData(pos=[])
-    imageplot_main.curr_point = -1
+    imageplot_main.curr_point = 0
     clear_layout(text_layout)
-    direction.setText("Select Landmark")
+    direction.setText("Select "+landmark_labels[0])
 
 
 def undo():
-    if len(imageplot_main.last_points) == 0:
+    if imageplot_main.curr_point == 0:
         return
-    imageplot_main.points[imageplot_main.last_points[-1]][1]=[]
-    landmark_buttons[imageplot_main.last_points[-1]].setStyleSheet("background-color : red")
-    imageplot_main.curr_point = -1
-    del imageplot_main.last_points[-1]
-    imageplot_main.scatterItem.setData(pos=[i[1] for i in imageplot_main.points if len(i[1])!=0])
-    direction.setText("Select Landmark")
+    del imageplot_main.points[-1]
+    imageplot_main.scatterItem.setData(pos=imageplot_main.points)
+    imageplot_main.curr_point -= 1
+    direction.setText("Select "+landmark_labels[imageplot_main.curr_point])
 
 
 def confirm():
@@ -182,18 +142,12 @@ def main():
 
     global proceed_ok
 
-    #Main Window
-    main_win = QWidget()
-    main_layout = QHBoxLayout()
-    main_win.setLayout(main_layout)
-    win.setCentralWidget(main_win)
-    win.setWindowTitle("Cleft Marker")
-
-    #Left window
+    #Main window
     central_win = QWidget()
     central_layout = QVBoxLayout()
     central_win.setLayout(central_layout)
-    main_layout.addWidget(central_win)
+    win.setCentralWidget(central_win)
+    win.setWindowTitle("My Own Title")
 
     #Pane for instruction
     direction_win = QWidget()
@@ -247,14 +201,6 @@ def main():
     confirm_button = QPushButton("Confirm")
     confirm_button.clicked.connect(confirm)
     central_layout.addWidget(confirm_button)
-
-    #RIGHT WINDOW
-    right_win = QWidget()
-    right_layout = QGridLayout()
-    right_win.setLayout(right_layout)
-    main_layout.addWidget(right_win)
-
-    add_buttons(right_layout)
 
     win.show()
 
