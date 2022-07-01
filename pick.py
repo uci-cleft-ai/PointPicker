@@ -1,24 +1,31 @@
 import cv2
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QLabel, QFileDialog, QScrollArea
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, \
+    QLabel, QFileDialog, QScrollArea
 from PyQt5.QtCore import QUrl, QEventLoop, Qt
 import pyqtgraph as pg
 
+import backend
+
+
 class ImagePlot(pg.GraphicsLayoutWidget):
 
-    def __init__(self, image = None):
+    def __init__(self, db=None, image=None):
         super(ImagePlot, self).__init__()
 
         self.image = image
         self.image_file = None
         self.image_item = None
 
+        self.orig_point = []
+        self.db = db
+
         self.curr_point = -1
         self.last_points = []
 
         self.p1 = pg.PlotItem()
         self.addItem(self.p1)
-        self.p1.vb.invertY(True) # Images need inverted Y axis
+        self.p1.vb.invertY(True)  # Images need inverted Y axis
 
         # Use ScatterPlotItem to draw points
         self.scatterItem = pg.ScatterPlotItem(
@@ -29,7 +36,7 @@ class ImagePlot(pg.GraphicsLayoutWidget):
             hoverBrush=pg.mkBrush(0, 255, 255)
         )
 
-        self.scatterItem.setZValue(2) # Ensure scatterPlotItem is always at top
+        self.scatterItem.setZValue(2)  # Ensure scatterPlotItem is always at top
         self.points = []
         for l in landmark_labels:
             self.points.append([l, []])
@@ -37,7 +44,6 @@ class ImagePlot(pg.GraphicsLayoutWidget):
         self.p1.addItem(self.scatterItem)
 
         direction.setText("Select Landmark")
-
 
     def set_image(self, image):
 
@@ -50,8 +56,7 @@ class ImagePlot(pg.GraphicsLayoutWidget):
 
         self.image = image
 
-
-    def next_image(self, image, image_file = None):
+    def next_image(self, image, image_file=None):
         self.set_image(image)
 
         self.points = []
@@ -61,26 +66,42 @@ class ImagePlot(pg.GraphicsLayoutWidget):
 
         self.image_file = image_file
 
+        # TODO fetch data from database and load self.orig_point
+        db_points = backend.fetch_data(self.db, image_file)
+        self.orig_point = []
+        if db_points is not None:
+            for l in landmark_labels:
+                self.orig_point.append([l, []])
+            for i in range(0, len(landmark_labels)):
+                if db_points[2 * i] is not None:
+                    self.orig_point[i][1] = [db_points[2 * i],
+                                             db_points[2 * i + 1]]
+
+        # initialize points if needed
+        if len(self.orig_point) != 0:
+            self.points = self.orig_point.copy()
 
     def proceed(self):
         global proceed_ok
-        for l, p in self.points:
-            if len(p)==0:
-                if self.curr_point != -1:
-                    direction.setText("You have not marked all the points.\nSelect "+landmark_labels[self.curr_point])
-                else:
-                    direction.setText("You have not marked all the points.")
-                return
-        record_data([i[1] for i in self.points], self.image_file)
-        proceed_ok = True
 
+        # FULL POINTS REQUIRED mod
+        # for l, p in self.points:
+        #     if len(p)==0:
+        #         if self.curr_point != -1:
+        #             direction.setText("You have not marked all the points.\nSelect "+landmark_labels[self.curr_point])
+        #         else:
+        #             direction.setText("You have not marked all the points.")
+        #         return
+
+        record_data(self.db, [[0, 0] if len(i[1]) == 0 else i[1] for i in self.points], self.image_file)
+        proceed_ok = True
 
     def add_data(self, x, y):
 
         self.points[self.curr_point][1] = [x, y]
-        self.scatterItem.setData(pos=[i[1] for i in self.points if len(i[1])!=0])
+        self.scatterItem.setData(pos=[i[1] for i in self.points if len(i[1]) != 0])
 
-        t = QLabel(landmark_labels[self.curr_point]+": "+str(x)+", "+str(y))
+        t = QLabel(landmark_labels[self.curr_point] + ": " + str(x) + ", " + str(y))
         text_layout.addWidget(t)
 
         landmark_buttons[self.curr_point].setStyleSheet("background-color : green")
@@ -89,14 +110,13 @@ class ImagePlot(pg.GraphicsLayoutWidget):
         self.curr_point = -1
 
         for l, p in self.points:
-            if len(p)==0:
+            if len(p) == 0:
                 direction.setText("Select Landmark")
                 return
         direction.setText("Press Confirm")
 
-
     def mousePressEvent(self, event):
-        point = self.p1.vb.mapSceneToView(event.pos()) # get the point clicked
+        point = self.p1.vb.mapSceneToView(event.pos())  # get the point clicked
         # Get pixel position of the mouse click
         x, y = point.x(), point.y()
 
@@ -105,16 +125,23 @@ class ImagePlot(pg.GraphicsLayoutWidget):
 
         super().mousePressEvent(event)
 
-
     def landmark_select(self, i):
         self.curr_point = i
         landmark_buttons[i].setStyleSheet("background-color : yellow")
-        direction.setText("Select "+landmark_labels[i])
+        direction.setText("Select " + landmark_labels[i])
 
 
-def record_data(points, image_file):
+def record_data(db, points, image_file):
+    #try:
+    backend.insert_data(db, image_file, [i for s in points for i in s])
+    # except Exception:
+    #     print("record_data: error")
+    #     record_data_csv(points, image_file)
+
+
+def record_data_csv(points, image_file):
     a = open("cleft_landmarks.csv", "a")
-    a.write(image_file+","+",".join([str(i) for s in points for i in s])+"\n")
+    a.write(image_file + "," + ",".join([str(i) for s in points for i in s]) + "\n")
 
 
 def clear_layout(layout):
@@ -133,14 +160,14 @@ def add_buttons(layout):
         landmark_buttons.append(QPushButton(landmark_labels[i]))
         landmark_buttons[-1].clicked.connect(button_click(i))
         landmark_buttons[-1].setStyleSheet("background-color : red")
-        layout.addWidget(landmark_buttons[-1], i%((len(landmark_labels)+1)//2), 2*i//len(landmark_labels))
+        layout.addWidget(landmark_buttons[-1], i % ((len(landmark_labels) + 1) // 2), 2 * i // len(landmark_labels))
 
 
 def button_click(i):
     return lambda: imageplot_main.landmark_select(i)
 
 
-def reset():
+def full_reset():
     imageplot_main.points = []
     for l in landmark_labels:
         imageplot_main.points.append([l, []])
@@ -152,28 +179,55 @@ def reset():
     direction.setText("Select Landmark")
 
 
+# revert to database original
+def reset():
+    imageplot_main.points = []
+    if len(imageplot_main.orig_point) != 0:
+        imageplot_main.points = imageplot_main.orig_point.copy()
+        for i in range(len(landmark_labels)):
+            if len(imageplot_main.points[i]) != 0:
+                landmark_buttons[i].setStyleSheet("background-color : green")
+            else:
+                landmark_buttons[i].setStyleSheet("background-color : red")
+    else:
+        for l in landmark_labels:
+            imageplot_main.points.append([l, []])
+        for i in range(len(landmark_labels)):
+            landmark_buttons[i].setStyleSheet("background-color : red")
+
+    imageplot_main.scatterItem.setData(pos=[i[1] for i in imageplot_main.points if len(i[1]) != 0])
+    imageplot_main.curr_point = -1
+    clear_layout(text_layout)
+    direction.setText("Select Landmark")
+
+
 def undo():
     if len(imageplot_main.last_points) == 0:
         return
-    imageplot_main.points[imageplot_main.last_points[-1]][1]=[]
+    imageplot_main.points[imageplot_main.last_points[-1]][1] = []
     landmark_buttons[imageplot_main.last_points[-1]].setStyleSheet("background-color : red")
     imageplot_main.curr_point = -1
     del imageplot_main.last_points[-1]
-    imageplot_main.scatterItem.setData(pos=[i[1] for i in imageplot_main.points if len(i[1])!=0])
+    imageplot_main.scatterItem.setData(pos=[i[1] for i in imageplot_main.points if len(i[1]) != 0])
     direction.setText("Select Landmark")
+
+
+def skip():
+    full_reset()
+    global loop
+    loop.quit()
 
 
 def confirm():
     global proceed_ok
     imageplot_main.proceed()
     if proceed_ok:
-        reset()
+        full_reset()
         global loop
         loop.quit()
 
 
 def main():
-
     global direction
     global text_layout
     global imageplot_main
@@ -182,30 +236,32 @@ def main():
 
     global proceed_ok
 
-    #Main Window
+    db = backend.get_db()
+
+    # Main Window
     main_win = QWidget()
     main_layout = QHBoxLayout()
     main_win.setLayout(main_layout)
     win.setCentralWidget(main_win)
     win.setWindowTitle("Cleft Marker")
 
-    #Left window
+    # Left window
     central_win = QWidget()
     central_layout = QVBoxLayout()
     central_win.setLayout(central_layout)
     main_layout.addWidget(central_win)
 
-    #Pane for instruction
+    # Pane for instruction
     direction_win = QWidget()
     direction_layout = QVBoxLayout()
     direction_win.setLayout(direction_layout)
     central_layout.addWidget(direction_win)
 
-    #Instruction
+    # Instruction
     direction = QLabel()
     direction_layout.addWidget(direction)
 
-    #Pane for image viewing & selecting
+    # Pane for image viewing & selecting
     image_win = QWidget()
     image_layout = QHBoxLayout()
     image_win.setLayout(image_layout)
@@ -213,11 +269,11 @@ def main():
 
     image_win.setFixedHeight(500)
 
-    #Two image panes for image pane
-    imageplot_main = ImagePlot()
+    # Two image panes for image pane
+    imageplot_main = ImagePlot(db)
     image_layout.addWidget(imageplot_main)
 
-    #Text space for recorded points for image
+    # Text space for recorded points for image
     text_win = QWidget()
     text_layout = QVBoxLayout()
     text_win.setLayout(text_layout)
@@ -227,28 +283,38 @@ def main():
     scroll.setWidgetResizable(True)
     central_layout.addWidget(scroll)
 
-    #Buttons space
+    # Buttons space
     button_win = QWidget()
     button_layout = QHBoxLayout()
     button_win.setLayout(button_layout)
     central_layout.addWidget(button_win)
 
-    #Button for clearing
-    reset_button = QPushButton("Reset Image Landmark")
-    reset_button.clicked.connect(reset)
+    # Button for full clearing
+    reset_button = QPushButton("Reset All")
+    reset_button.clicked.connect(full_reset)
     button_layout.addWidget(reset_button)
 
-    #Button for undoing
+    # Button for reverting back
+    revert_button = QPushButton("Revert to Original")
+    revert_button.clicked.connect(reset)
+    button_layout.addWidget(revert_button)
+
+    # Button for undoing
     undo_button = QPushButton("Undo")
     undo_button.clicked.connect(undo)
     button_layout.addWidget(undo_button)
 
-    #Button for completing
+    # Button for undoing
+    skip_button = QPushButton("Skip")
+    skip_button.clicked.connect(skip)
+    button_layout.addWidget(skip_button)
+
+    # Button for completing
     confirm_button = QPushButton("Confirm")
     confirm_button.clicked.connect(confirm)
     central_layout.addWidget(confirm_button)
 
-    #RIGHT WINDOW
+    # RIGHT WINDOW
     right_win = QWidget()
     right_layout = QGridLayout()
     right_win.setLayout(right_layout)
@@ -260,13 +326,13 @@ def main():
 
     options = QFileDialog.Options()
     options |= QFileDialog.DontUseNativeDialog
-    files, _ = QFileDialog.getOpenFileNames(central_win,"QFileDialog.getOpenFileNames()", "","All Files (*);;Python Files (*.py)", options=options)
+    files, _ = QFileDialog.getOpenFileNames(central_win, "QFileDialog.getOpenFileNames()", "",
+                                            "All Files (*);;Python Files (*.py)", options=options)
     if not files:
         app.exit(app.exec_())
         return
 
     for img_path in files:
-
         proceed_ok = False
 
         url = QUrl.fromLocalFile(img_path)
