@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import cv2
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, \

@@ -4,6 +4,7 @@ import mysql.connector
 # Replaces data points on image_file's row with new data
 # NEED TESTING
 def insert_data(db, image_file, data):
+
     cur = db.cursor()
 
     cur.execute("""SELECT id from cleftpoints WHERE imagefile='{}'""".format(image_file))
