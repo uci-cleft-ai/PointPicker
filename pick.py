@@ -76,10 +76,12 @@ class ImagePlot(pg.GraphicsLayoutWidget):
                 if db_points[2 * i] is not None:
                     self.orig_point[i][1] = [db_points[2 * i],
                                              db_points[2 * i + 1]]
+                    landmark_buttons[i].setStyleSheet("background-color : green")
 
         # initialize points if needed
         if len(self.orig_point) != 0:
             self.points = self.orig_point.copy()
+            self.scatterItem.setData(pos=[i[1] for i in self.points if len(i[1]) != 0])
 
     def proceed(self):
         global proceed_ok
